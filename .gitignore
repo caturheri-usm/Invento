@@ -1,0 +1,12 @@
+# Folder env
+env/
+
+# Folder __pycache__
+__pycache__/
+
+# File konfigurasi lingkungan virtual (jika ada)
+.env
+
+# File log atau file temporary lainnya
+*.log
+*.tmp
