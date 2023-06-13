@@ -383,7 +383,7 @@ async def get_project_by_id(
         if project_doc.exists:
             project_data = project_doc.to_dict()
             user_id = current_user.user_id
-            interaction_data = {"user_id": user_id, "project_id": project_id}
+            interaction_data = {"id_user": user_id, "id_proyek": project_id}
             await db.collection("interactions").add(interaction_data)
             return JSONResponse(content=project_data, status_code=200)
         else:
@@ -395,7 +395,7 @@ async def get_project_by_id(
 @app.put(
     "/projects/{project_id}",
     tags=["Admin-Proyek"],
-    summary="User melakukan perubahan data proyek tertentu",
+    summary="admin proyek melakukan perubahan data proyek tertentu",
     description="digunakan untuk edit data oleh admin proyek jika mengalami perubahan data",
 )
 async def update_project(
@@ -408,29 +408,29 @@ async def update_project(
         doc_ref = db.collection("projects").document(project_id)
         project_doc = await doc_ref.get()
         if not project_doc.exists:
-            raise HTTPException(status_code=404, detail="")
-        getId = project_doc.to_dict().get("createdBy")
-        if getId != uid:
-            raise HTTPException(status_code=403, detail="")
+            raise HTTPException(status_code=404, detail="Project not found")
+        project_data = project_doc.to_dict()
+        if project_data.get("createdById") != uid:
+            raise HTTPException(status_code=403, detail="Access denied")
         await doc_ref.update(update_project.dict())
         updated_project_doc = await doc_ref.get()
         updated_project_data = updated_project_doc.to_dict()
         return JSONResponse(
             content={
-                "message": "Proyek berhasil diperbarui",
+                "message": "Project updated successfully",
                 "project": updated_project_data,
             },
             status_code=200,
         )
     except:
-        raise HTTPException(status_code=500, detail="Project Not Found")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.delete(
     "/projects/{project_id}",
     tags=["Admin-Proyek"],
-    summary="User melakukan penghapusan proyek tertentu",
-    description="User melakukan penghapusan proyek tertentu berdasarkan project_id",
+    summary="admin proyek melakukan penghapusan proyek tertentu",
+    description="admin proyek melakukan penghapusan proyek tertentu berdasarkan project_id",
 )
 async def delete_project(
     project_id: str, current_user: FirebaseClaims = Depends(get_current_user)
@@ -442,7 +442,7 @@ async def delete_project(
         if not project.exists:
             raise HTTPException(status_code=404, detail="")
         project_data = project.to_dict()
-        created_by = project_data.get("createdBy")
+        created_by = project_data.get("createdById")
         if created_by != uid:
             raise HTTPException(status_code=403, detail="")
         await doc_ref.delete()
@@ -456,8 +456,8 @@ async def delete_project(
 @app.post(
     "/projects/{project_id}/join",
     tags=["Proyek"],
-    summary="User melakukan join pada projek tertentu berdasarkan id",
-    description="user yang tertarik dapat bergabung dengan projek tertentu berdasarkan id proyek.",
+    summary="Users melakukan join pada projek tertentu berdasarkan id",
+    description="Users yang tertarik dapat bergabung dengan projek tertentu berdasarkan id proyek.",
 )
 async def join_project(
     project_id: str, current_user: FirebaseClaims = Depends(get_current_user)
@@ -466,6 +466,17 @@ async def join_project(
     project_ref = db.collection("projects").document(project_id)
     project = await project_ref.get()
     if project.exists:
+        join_requests_ref = db.collection("join_requests")
+        join_request_query = join_requests_ref.where(filter=FieldFilter("project_id", "==", project_id)).where(filter=FieldFilter("user_id", "==", user_id))
+        existing_requests = []
+        async for request_doc in join_request_query.stream():
+            existing_requests.append(request_doc)
+        if existing_requests:
+            raise HTTPException(status_code=400, detail="User has already sent a join request.")
+        project_data = project.to_dict()
+        created_by = project_data.get("createdById")
+        if created_by == user_id:
+            raise HTTPException(status_code=403, detail="Cannot join your own project.")
         join_request_doc = db.collection("join_requests").document()
         users_ref = db.collection("users").document(user_id)
         user_data = await users_ref.get()
@@ -491,8 +502,8 @@ async def join_project(
 @app.get(
     "/projects/{project_id}/join",
     tags=["Admin-Proyek"],
-    summary="User melihat daftar user yang telah bergabung",
-    description="admin proyek bisa melihat user yang tertarik dan bergabung pada proyek yang dibuatnya",
+    summary="admin proyek melihat daftar permintaan join pada proyek buatannya.",
+    description="admin proyek melihat daftar permintaan bergabung pada proyek yang dibuatnya.",
 )
 async def get_join_requests(
     project_id: str,
@@ -503,7 +514,7 @@ async def get_join_requests(
     project_snapshot = await project_ref.get()
     if (
         project_snapshot.exists
-        and project_snapshot.to_dict().get("createdBy") == admin_id
+        and project_snapshot.to_dict().get("createdById") == admin_id
     ):
         join_requests_ref = db.collection("join_requests")
         join_requests_query = join_requests_ref.where(
@@ -519,6 +530,8 @@ async def get_join_requests(
                 "message": request_data.get("message"),
             }
             join_requests.append(pending_request)
+        if not join_requests:
+            raise HTTPException(status_code=404, detail="Join requests not found")
         return JSONResponse(content={"join_requests": join_requests}, status_code=200)
     else:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -527,8 +540,8 @@ async def get_join_requests(
 @app.post(
     "/projects/{project_id}/join/{request_id}",
     tags=["Admin-Proyek"],
-    summary="User melakukan konfirmasi dari permintaan user yang join",
-    description="berguna untuk menyeleksi mana saja user yang disetujui atau ditolak bergabung didalam proyek dibuatnya",
+    summary="admin proyek melakukan konfirmasi dari permintaan user yang join",
+    description="berguna untuk menyeleksi mana saja user yang disetujui atau ditolak bergabung didalam proyek dibuatnya. jika **status**:**false**, maka permintaan ditolak. jika **status**:**true**, maka permintaan diterima.",
 )
 async def process_join_request(
     project_id: str,
@@ -542,7 +555,7 @@ async def process_join_request(
     project_ref = db.collection("projects").document(project_id)
     join_request_ref = db.collection("join_requests").document(request_id)
     project = await project_ref.get()
-    if not project.exists or project.to_dict().get("createdBy") != admin_id:
+    if not project.exists or project.to_dict().get("createdById") != admin_id:
         raise HTTPException(status_code=403, detail="Access denied")
     join_request = await join_request_ref.get()
     if not join_request.exists:
@@ -553,7 +566,7 @@ async def process_join_request(
         user_id = join_request_data["user_id"]
         await project_ref.update({"members": firestore.ArrayUnion([user_id])})
         return JSONResponse(
-            content={"message": "Join request successfully"}, status_code=200
+            content={"message": "Join request accepted"}, status_code=200
         )
     else:
         return JSONResponse(
@@ -564,7 +577,7 @@ async def process_join_request(
 @app.get(
     "/projects/{project_id}/members",
     tags=["Admin-Proyek"],
-    summary="User bisa melihat daftar user yang telah disetujui untuk bergabung proyek yang dibuat",
+    summary="admin proyek bisa melihat daftar user yang telah disetujui untuk bergabung proyek yang dibuat",
     description="melihat semua daftar users yang telah disetujui bergabung pada admin proyek",
 )
 async def get_project_members(
@@ -576,7 +589,7 @@ async def get_project_members(
         project_snapshot = await project_ref.get()
         if project_snapshot.exists:
             project_data = project_snapshot.to_dict()
-            if current_user.user_id == project_data.get("createdBy"):
+            if current_user.user_id == project_data.get("createdById"):
                 members = project_data.get("members", [])
                 members_data = []
                 for member_id in members:
@@ -605,7 +618,7 @@ async def get_my_projects(current_user: FirebaseClaims = Depends(get_current_use
     admin = current_user.user_id
     projects_ref = (
         db.collection("projects")
-        .where(filter=FieldFilter("createdBy", "==", admin))
+        .where(filter=FieldFilter("createdById", "==", admin))
         .stream()
     )
     projects = []
@@ -621,8 +634,8 @@ async def get_my_projects(current_user: FirebaseClaims = Depends(get_current_use
 @app.get(
     "/myjoinrequests",
     tags=["Proyek"],
-    summary="user melihat daftar join requests terhadap project",
-    description="user yang telah melakukan join requests ke projek dapat dilihat melalui endpoint ini",
+    summary="Users melihat daftar join requests terhadap project",
+    description="Users yang telah melakukan join requests ke projek dapat dilihat melalui endpoint ini",
 )
 async def my_join_requests(current_user: FirebaseClaims = Depends(get_current_user)):
     user_id = current_user.user_id
@@ -670,7 +683,7 @@ async def delete_project_member(
         project_snapshot = await project_ref.get()
         if project_snapshot.exists:
             project_data = project_snapshot.to_dict()
-            if current_user.user_id == project_data.get("createdBy"):
+            if current_user.user_id == project_data.get("createdById"):
                 members = project_data.get("members", [])
                 if user_id in members:
                     members.remove(user_id)
