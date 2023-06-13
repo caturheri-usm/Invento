@@ -70,6 +70,7 @@ class UserInfo(BaseModel):
     status: bool
     msg: str
 
+
 # Endpoint untuk registrasi pengguna baru
 @app.post(
     "/register",
@@ -196,7 +197,7 @@ async def resetPassword(request: ResetPassword):
 
 
 # Endpoint protected_route
-@app.get("/current")
+@app.get("/current", include_in_schema=False)
 async def current(current_user: FirebaseClaims = Depends(get_current_user)):
     uid = current_user.user_id
     email = current_user.email
@@ -316,14 +317,22 @@ async def create_project(
     elif not project_data.get("desc"):
         raise HTTPException(status_code=400, detail="Description are required.")
     try:
-        project_data["createdBy"] = uid
-        new_project_ref = db.collection("projects").document()
-        await new_project_ref.set(project_data)
-        new_project_id = new_project_ref.id
-        return JSONResponse(
-            content={"message": "Project created successfully", "id": new_project_id},
-            status_code=200,
-        )
+        user_ref = await db.collection("users").document(uid).get()
+        if user_ref.exists:
+            user_data = user_ref.to_dict()
+            created_by_name = user_data.get("name")
+            project_data["createdById"] = uid
+            project_data["createdByName"] = created_by_name
+            new_project_ref = db.collection("projects").document()
+            await new_project_ref.set(project_data)
+            new_project_id = new_project_ref.id
+            return JSONResponse(
+                content={
+                    "message": "Project created successfully",
+                    "id": new_project_id,
+                },
+                status_code=200,
+            )
     except:
         raise HTTPException(status_code=400, detail="Failed to Create Project.")
 
@@ -340,7 +349,7 @@ async def get_projects(current_user: FirebaseClaims = Depends(get_current_user))
     projects = []
     async for project in projects_ref:
         project_data = project.to_dict()
-        created_by = project_data.get("createdBy")
+        created_by = project_data.get("createdById")
         user_ref = db.collection("users").document(created_by)
         user_doc = await user_ref.get()
         if user_doc.exists:
@@ -350,7 +359,8 @@ async def get_projects(current_user: FirebaseClaims = Depends(get_current_user))
                 "name": project_data.get("name"),
                 "tag": project_data.get("tag"),
                 "desc": project_data.get("desc"),
-                "createdBy": user_data.get("name"),
+                "createdByName": user_data.get("name"),
+                "createdById": project_data.get("createdById"),
             }
             projects.append(project_info)
     if len(projects) == 0:
@@ -373,10 +383,7 @@ async def get_project_by_id(
         if project_doc.exists:
             project_data = project_doc.to_dict()
             user_id = current_user.user_id
-            interaction_data = {
-                "user_id": user_id,
-                "project_id": project_id
-            }
+            interaction_data = {"user_id": user_id, "project_id": project_id}
             await db.collection("interactions").add(interaction_data)
             return JSONResponse(content=project_data, status_code=200)
         else:
@@ -474,9 +481,6 @@ async def join_project(
             "message": f"{user_name} requests to join your {project_name} project.",
         }
         await join_request_doc.set(join_request_data)
-        # await project_ref.update(
-        #     {"join_requests": firestore.ArrayUnion([join_request_doc.id])}
-        # )
         return JSONResponse(
             content={"message": "Join request has been sent"}, status_code=200
         )
@@ -614,7 +618,12 @@ async def get_my_projects(current_user: FirebaseClaims = Depends(get_current_use
     return {"projects": projects}
 
 
-@app.get("/myjoinrequests", tags=["Proyek"])
+@app.get(
+    "/myjoinrequests",
+    tags=["Proyek"],
+    summary="user melihat daftar join requests terhadap project",
+    description="user yang telah melakukan join requests ke projek dapat dilihat melalui endpoint ini",
+)
 async def my_join_requests(current_user: FirebaseClaims = Depends(get_current_user)):
     user_id = current_user.user_id
     if not user_id:
