@@ -6,8 +6,6 @@ __pycache__/
 
 # File konfigurasi lingkungan virtual (jika ada)
 .env
-.\firebase_config.json
-.\key.json
 
 # File log atau file temporary lainnya
 *.log
