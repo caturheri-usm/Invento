@@ -70,6 +70,8 @@ class UserInfo(BaseModel):
     status: bool
     msg: str
 
+class InteractionInput(BaseModel):
+    project_id: str
 
 # Endpoint untuk registrasi pengguna baru
 @app.post(
@@ -318,8 +320,7 @@ async def create_project(
         raise HTTPException(status_code=400, detail="Description are required.")
     try:
         project_data["createdBy"] = uid
-        projects_collection = await db.collection("projects")
-        new_project_ref = projects_collection.document()
+        new_project_ref = db.collection("projects").document()
         await new_project_ref.set(project_data)
         new_project_id = new_project_ref.id
         return JSONResponse(
@@ -374,6 +375,12 @@ async def get_project_by_id(
         project_doc = await db.collection("projects").document(project_id).get()
         if project_doc.exists:
             project_data = project_doc.to_dict()
+            user_id = current_user.user_id
+            interaction_data = {
+                "user_id": user_id,
+                "project_id": project_id
+            }
+            await db.collection("interactions").add(interaction_data)
             return JSONResponse(content=project_data, status_code=200)
         else:
             raise HTTPException(status_code=404, detail="Project not found")
