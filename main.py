@@ -70,9 +70,6 @@ class UserInfo(BaseModel):
     status: bool
     msg: str
 
-class InteractionInput(BaseModel):
-    project_id: str
-
 # Endpoint untuk registrasi pengguna baru
 @app.post(
     "/register",
