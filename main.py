@@ -338,29 +338,26 @@ async def create_project(
     description="dapat digunakan didashboard atau beranda untuk menampilkan semua proyek yang telah dibuat oleh users",
 )
 async def get_projects(current_user: FirebaseClaims = Depends(get_current_user)):
-    try:
-        projects_ref = db.collection("projects").stream()
-        projects = []
-        async for project in projects_ref:
-            project_data = project.to_dict()
-            created_by = project_data.get("createdBy")
-            user_ref = db.collection("users").document(created_by)
-            user_doc = await user_ref.get()
-            if user_doc.exists:
-                user_data = user_doc.to_dict()
-                project_info = {
-                    "project_id": project.id,
-                    "name": project_data.get("name"),
-                    "tag": project_data.get("tag"),
-                    "desc": project_data.get("desc"),
-                    "createdBy": user_data.get("name"),
-                }
-                projects.append(project_info)
-        if len(projects) == 0:
-            raise HTTPException(status_code=404, detail="Projects not found")
-        return JSONResponse(content={"projects": projects}, status_code=200)
-    except:
-        raise HTTPException(status_code=500, detail="Internal server error")
+    projects_ref = db.collection("projects").stream()
+    projects = []
+    async for project in projects_ref:
+        project_data = project.to_dict()
+        created_by = project_data.get("createdBy")
+        user_ref = db.collection("users").document(created_by)
+        user_doc = await user_ref.get()
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            project_info = {
+                "project_id": project.id,
+                "name": project_data.get("name"),
+                "tag": project_data.get("tag"),
+                "desc": project_data.get("desc"),
+                "createdBy": user_data.get("name"),
+            }
+            projects.append(project_info)
+    if len(projects) == 0:
+        raise HTTPException(status_code=404, detail="Projects not found")
+    return JSONResponse(content={"projects": projects}, status_code=200)
 
 
 # endpoint untuk mengambil proyek berdasarkan id
@@ -645,7 +642,7 @@ async def my_join_requests(current_user: FirebaseClaims = Depends(get_current_us
 
 
 @app.delete(
-    "/projects/{project_id}/members/{member_id}",
+    "/projects/{project_id}/members/{user_id}",
     tags=["Admin-Proyek"],
     summary="Admin-Proyek dapat menghapus anggota dari proyek",
     description="Menghapus anggota (members) dari proyek oleh admin proyek",
