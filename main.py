@@ -6,6 +6,12 @@ from fastapi_cloudauth.firebase import FirebaseCurrentUser, FirebaseClaims
 from google.cloud.firestore_v1.base_query import FieldFilter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+import tensorflow as tf
+from typing import List
+import numpy as np
+
+# tambahkan model ke direktori model dengan nama model.h5
+model = tf.keras.models.load_model("model/model.h5")
 
 # Inisialisasi aplikasi Firebase
 cred = credentials.Certificate("./key.json")
@@ -701,3 +707,26 @@ async def delete_project_member(
             raise HTTPException(status_code=404, detail="Project not found")
     except:
         raise HTTPException(status_code=500, detail=("Internal Server Error"))
+
+
+@app.get("/recommendations", tags=["Rekomendasi"])
+async def get_recommendations(current_user: FirebaseClaims = Depends(get_current_user)):
+    try:
+        user_id = current_user.user_id
+
+        # Ambil koleksi interactions dari Firestore
+        interactions_ref = db.collection("interactions")
+        interactions_query = interactions_ref.where("id_user", "==", user_id)
+        interactions_docs = await interactions_query.get()
+        # interacted_projects menghasilkan interaksi id_proyek yang telah dilakukan oleh user_id
+        interacted_projects = [doc.get("id_proyek") for doc in interactions_docs] 
+
+        # Lakukan logika rekomendasi sesuai dengan dokumentasi yang diberikan
+        # ...
+
+        # Hasilkan daftar rekomendasi
+        recommendations = []
+
+        return {"user_id": user_id, "recommendations": recommendations}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal Server Error") from e
