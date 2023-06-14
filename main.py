@@ -11,7 +11,7 @@ from typing import List
 import numpy as np
 
 # tambahkan model ke direktori model dengan nama model.h5
-model = tf.keras.models.load_model("model/model.h5")
+#model = tf.keras.models.load_model("model/model.h5")
 
 # Inisialisasi aplikasi Firebase
 cred = credentials.Certificate("./key.json")
@@ -34,6 +34,7 @@ pb = py.auth()
 
 # Model data register request
 class RegisterRequest(BaseModel):
+    username: str
     email: str
     password: str
 
@@ -81,12 +82,15 @@ class UserInfo(BaseModel):
 @app.post(
     "/register",
     summary="User melakukan registrasi.",
-    description="isi request body seperti dibawah ini lalu akan menghasilkan user_id dan token, **setelah register, tampilkan halaman untuk melakukan verifikasi di email user**",
+    description="isi request body seperti dibawah ini lalu akan menghasilkan user_id dan token. **setelah register, tampilkan halaman untuk melakukan verifikasi email user**",
     tags=["Auth"],
 )
 async def register(register: RegisterRequest):
+    username = register.username
     email = register.email
     password = register.password
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password are required.")
     elif not re.match(r"[^@]+@[^@]+\.[^@]+", email):
@@ -105,15 +109,24 @@ async def register(register: RegisterRequest):
         )
     except auth.UserNotFoundError:
         try:
+            users_collection = db.collection("users")
+            query = users_collection.where(filter=FieldFilter("username", "==", username)).limit(1)
+            query_results = await query.get()
+            if len(query_results) > 0:
+                raise HTTPException(
+                    status_code=400, detail={"message": "Username already exists."}
+                )
             user = pb.create_user_with_email_and_password(email, password)
             uid = user.get("localId")
             user = pb.refresh(user["refreshToken"])
             token = user["idToken"]
             pb.send_email_verification(token)
+            user_data = {"username": username}
+            await users_collection.document(uid).set(user_data)
             return JSONResponse(
                 content={
                     "message": "Registration successful. Please check your email for verification.",
-                    "uid": uid,
+                    "id_user": uid,
                     "token": token,
                 },
                 status_code=200,
@@ -145,7 +158,12 @@ async def formRegister(
     try:
         uid = current_user.user_id
         users_collection = db.collection("users")
-        user_data = {"email": email, "name": name, "tag": tag, "desc": desc}
+        user_doc = await users_collection.document(uid).get()
+        if user_doc.exists:
+            username = user_doc.get("username")
+        else:
+            username = ""
+        user_data = {"username": username, "email": email, "name": name, "tag": tag, "desc": desc}
         await users_collection.document(uid).set(user_data)
         return JSONResponse(
             content={"message": "Data user berhasil disimpan.", "user": user_data},
@@ -175,7 +193,7 @@ async def login(login: LoginRequest):
         user = pb.refresh(user["refreshToken"])
         token = user["idToken"]
         return JSONResponse(
-            content={"message": "Login successful", "uid": uid, "token": token},
+            content={"message": "Login successful", "id_user": uid, "token": token},
             status_code=200,
         )
     except:
