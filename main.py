@@ -11,7 +11,7 @@ from typing import List
 import numpy as np
 
 # tambahkan model ke direktori model dengan nama model.h5
-#model = tf.keras.models.load_model("model/model.h5")
+model = tf.keras.models.load_model("model/model.h5")
 
 # Inisialisasi aplikasi Firebase
 cred = credentials.Certificate("./key.json")
@@ -19,7 +19,7 @@ initialize_app(cred)
 db = firestore_async.client()
 
 app = FastAPI(
-    title="Invento Flow App",
+    title="Invento App API",
     description="API ini dibangun menggunakan FastAPI dan digunakan untuk menciptakan alur app invento ke mobile client.",
     version="1.0.0",
 )
@@ -345,7 +345,9 @@ async def create_project(
         if user_ref.exists:
             user_data = user_ref.to_dict()
             created_by_name = user_data.get("name")
+            username = user_data.get("username")
             project_data["createdById"] = uid
+            project_data["username"] = username
             project_data["createdByName"] = created_by_name
             new_project_ref = db.collection("projects").document()
             await new_project_ref.set(project_data)
@@ -384,7 +386,8 @@ async def get_projects(current_user: FirebaseClaims = Depends(get_current_user))
                 "tag": project_data.get("tag"),
                 "desc": project_data.get("desc"),
                 "createdByName": user_data.get("name"),
-                "createdById": project_data.get("createdById"),
+                "username": user_data.get("username"),
+                "createdById": project_data.get("createdById")
             }
             projects.append(project_info)
     if len(projects) == 0:
