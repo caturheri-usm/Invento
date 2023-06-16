@@ -1,17 +1,17 @@
 import pyrebase, re, json
 from firebase_admin import auth, credentials, firestore_async, initialize_app, firestore
-from fastapi.responses import JSONResponse
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile
 from fastapi_cloudauth.firebase import FirebaseCurrentUser, FirebaseClaims
 from google.cloud.firestore_v1.base_query import FieldFilter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import tensorflow as tf
-from typing import List
-import numpy as np
+# import tensorflow as tf
+# from typing import List
+# import numpy as np
 
 # tambahkan model ke direktori model dengan nama model.h5
-model = tf.keras.models.load_model("model/model.h5")
+#model = tf.keras.models.load_model("model/model.h5")
 
 # Inisialisasi aplikasi Firebase
 cred = credentials.Certificate("./key.json")
@@ -31,6 +31,7 @@ get_current_user = FirebaseCurrentUser(project_id=project_id)
 
 py = pyrebase.initialize_app(json.load(open("firebase_config.json")))
 pb = py.auth()
+store = py.storage()
 
 # Model data register request
 class RegisterRequest(BaseModel):
@@ -119,6 +120,7 @@ async def register(register: RegisterRequest):
             user = pb.create_user_with_email_and_password(email, password)
             uid = user.get("localId")
             user = pb.refresh(user["refreshToken"])
+            global token
             token = user["idToken"]
             pb.send_email_verification(token)
             user_data = {"username": username}
@@ -191,6 +193,7 @@ async def login(login: LoginRequest):
         user = pb.sign_in_with_email_and_password(email, password)
         uid = user.get("localId")
         user = pb.refresh(user["refreshToken"])
+        global token
         token = user["idToken"]
         return JSONResponse(
             content={"message": "Login successful", "id_user": uid, "token": token},
@@ -267,7 +270,16 @@ async def get_user_by_id(
         user_doc = await doc_ref.get()
         if user_doc.exists:
             user_data = user_doc.to_dict()
-            return {"user": user_data}
+            allowed_extensions = ["jpg", "png"]
+            photo_url = None
+            for extension in allowed_extensions:
+                temp_url = store.child(f"users/{user_id}.{extension}").get_url(token)
+                if temp_url is not None:
+                    photo_url = temp_url
+                    break
+            if photo_url:
+                user_data["photo_url"] = photo_url
+            return JSONResponse(content={"user": user_data}, status_code=200)
         else:
             raise HTTPException(status_code=404, detail="User not found")
     except:
@@ -281,17 +293,27 @@ async def get_user_by_id(
     description="digunakan untuk melihat data profil user.",
 )
 async def get_profile(current_user: FirebaseClaims = Depends(get_current_user)):
-    try:
-        user_id = current_user.user_id
-        doc_ref = db.collection("users").document(user_id)
-        user_doc = await doc_ref.get()
-        if user_doc.exists:
-            user_data = user_doc.to_dict()
-            return {"user": user_data}
-        else:
-            raise HTTPException(status_code=404, detail="User not found")
-    except:
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+    # try:
+    user_id = current_user.user_id
+    doc_ref = db.collection("users").document(user_id)
+    user_doc = await doc_ref.get()
+    if user_doc.exists:
+        user_data = user_doc.to_dict()
+        allowed_extensions = ["jpg", "png"]
+        photo_url = None
+        for extension in allowed_extensions:
+            temp_url = store.child(f"users/{user_id}.{extension}").get_url(token)
+            if temp_url is not None:
+                photo_url = temp_url
+                break
+        if photo_url:
+            user_data["photo_url"] = photo_url
+        return JSONResponse(content={"user": user_data}, status_code=200)
+    else:
+        raise HTTPException(status_code=404, detail="User not found")
+    # except:
+    #     raise HTTPException(status_code=500, detail="Internal Server Error")
+
 
 
 # Endpoint untuk mengubah profil user berdasarkan id
@@ -319,6 +341,25 @@ async def update_profile(
     except:
         raise HTTPException(status_code=400, detail="Failed to Update Profile")
 
+@app.put("/foto-profil", tags=["Profile"], summary="Upload Foto Profil Pengguna", description="endpoint untuk mengunggah foto profil users")
+async def upload_profile_photo(
+    profile_photo: UploadFile = File(...),
+    current_user: FirebaseClaims = Depends(get_current_user)
+):
+    user_id = current_user.user_id
+    if not user_id:
+        raise HTTPException(status_code=403, detail="Forbidden.")
+    try:
+        allowed_extensions = ["jpg","png"]
+        file_extension = profile_photo.filename.split(".")[-1]
+        if file_extension not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="Invalid file extension. Only JPG and PNG files are allowed.")
+        filename = f"{user_id}.{file_extension}"
+        store.child(f"users/{filename}").put(profile_photo.file, token) 
+        photo_url = store.child(f"users/{filename}").get_url(token)
+        return JSONResponse(content={"message": "Foto profil berhasil diunggah", "photo_url": photo_url}, status_code=200)
+    except:
+        raise HTTPException(status_code=400, detail="Gagal mengunggah foto profil")
 
 # Endpoint untuk membuat proyek baru
 @app.post(
@@ -730,24 +771,49 @@ async def delete_project_member(
         raise HTTPException(status_code=500, detail=("Internal Server Error"))
 
 
-@app.get("/recommendations", tags=["Rekomendasi"])
-async def get_recommendations(current_user: FirebaseClaims = Depends(get_current_user)):
-    try:
-        user_id = current_user.user_id
-
-        # Ambil koleksi interactions dari Firestore
-        interactions_ref = db.collection("interactions")
-        interactions_query = interactions_ref.where("id_user", "==", user_id)
-        interactions_docs = await interactions_query.get()
-        # interacted_projects menghasilkan interaksi id_proyek yang telah dilakukan oleh user_id
-        interacted_projects = [doc.get("id_proyek") for doc in interactions_docs] 
-
-        # Lakukan logika rekomendasi sesuai dengan dokumentasi yang diberikan
-        # ...
-
-        # Hasilkan daftar rekomendasi
-        recommendations = []
-
-        return {"user_id": user_id, "recommendations": recommendations}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Internal Server Error") from e
+# @app.get("/recommendations", tags=["Rekomendasi"])
+# async def get_recommendations(current_user: FirebaseClaims = Depends(get_current_user)):
+#     user_id = current_user.user_id
+#     interactions_ref = db.collection("interactions")
+#     interactions_query = interactions_ref.where(
+#         filter=FieldFilter("id_user", "==", user_id)
+#     )
+#     interactions_docs = await interactions_query.get()
+#     interacted_projects = [doc.get("id_proyek") for doc in interactions_docs]
+#     all_projects = await db.collection("projects").get()
+#     all_project_ids = [doc.id for doc in all_projects]
+#     hits = []
+#     recommendations = {}
+#     for project_id in all_project_ids:
+#         if project_id not in interacted_projects:
+#             test_items = interacted_projects.copy() + [project_id]
+#             u_tensor = tf.convert_to_tensor([user_id] * len(test_items), dtype=tf.int32)
+#             test_items_tensor = tf.convert_to_tensor(test_items, dtype=tf.int32)
+#             predicted_label = model([u_tensor, test_items_tensor])
+#             predicted_labels = tf.squeeze(predicted_label).numpy()
+#             top10_items = [
+#                 test_items[i] for i in np.argsort(predicted_labels)[::-1][:10]
+#             ]
+#             recommendations[project_id] = top10_items
+#     hit_ratio = 0.0
+#     if interacted_projects:
+#         hits = [
+#             1 if rec_item in interacted_projects else 0
+#             for rec_item in recommendations[user_id]
+#         ]
+#         hit_ratio = sum(hits) / len(hits)
+#     # Menghasilkan rekomendasi berdasarkan user_id
+#     if user_id in recommendations:
+#         recommended_items = recommendations[user_id]
+#         return {
+#             "user_id": user_id,
+#             "recommendations": recommended_items,
+#             "hit_ratio": hit_ratio,
+#         }
+#     else:
+#         return {
+#             "user_id": user_id,
+#             "recommendations": [],
+#             "hit_ratio": hit_ratio,
+#             "message": "Belum ada interaksi dengan proyek manapun",
+#         }

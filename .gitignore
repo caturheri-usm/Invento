@@ -1,11 +1,14 @@
 # Folder env
 env/
+model/
 
 # Folder __pycache__
 __pycache__/
 
 # File konfigurasi lingkungan virtual (jika ada)
 .env
+firebase_config.json
+key.json
 
 # File log atau file temporary lainnya
 *.log
