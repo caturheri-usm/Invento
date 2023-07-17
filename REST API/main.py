@@ -1,17 +1,12 @@
 import pyrebase, re, json
 from firebase_admin import auth, credentials, firestore_async, initialize_app, firestore
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse
 from fastapi import FastAPI, HTTPException, Depends, File, UploadFile
 from fastapi_cloudauth.firebase import FirebaseCurrentUser, FirebaseClaims
 from google.cloud.firestore_v1.base_query import FieldFilter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-# import tensorflow as tf
-# from typing import List
-# import numpy as np
 
-# tambahkan model ke direktori model dengan nama model.h5
-#model = tf.keras.models.load_model("model/model.h5")
 
 # Inisialisasi aplikasi Firebase
 cred = credentials.Certificate("./key.json")
@@ -84,7 +79,7 @@ class UserInfo(BaseModel):
     "/register",
     summary="User melakukan registrasi.",
     description="isi request body seperti dibawah ini lalu akan menghasilkan user_id dan token. **setelah register, tampilkan halaman untuk melakukan verifikasi email user**",
-    tags=["Auth"],
+    tags=["Auth"]
 )
 async def register(register: RegisterRequest):
     username = register.username
@@ -111,7 +106,9 @@ async def register(register: RegisterRequest):
     except auth.UserNotFoundError:
         try:
             users_collection = db.collection("users")
-            query = users_collection.where(filter=FieldFilter("username", "==", username)).limit(1)
+            query = users_collection.where(
+                filter=FieldFilter("username", "==", username)
+            ).limit(1)
             query_results = await query.get()
             if len(query_results) > 0:
                 raise HTTPException(
@@ -165,7 +162,13 @@ async def formRegister(
             username = user_doc.get("username")
         else:
             username = ""
-        user_data = {"username": username, "email": email, "name": name, "tag": tag, "desc": desc}
+        user_data = {
+            "username": username,
+            "email": email,
+            "name": name,
+            "tag": tag,
+            "desc": desc,
+        }
         await users_collection.document(uid).set(user_data)
         return JSONResponse(
             content={"message": "Data user berhasil disimpan.", "user": user_data},
@@ -234,30 +237,9 @@ async def current(current_user: FirebaseClaims = Depends(get_current_user)):
     )
 
 
-@app.get(
-    "/users",
-    tags=["Users"],
-    summary="menampilkan semua data users",
-    description="menampilkan seluruh data users yang telah melakukan registrasi dan pengisian form-register",
-)
-async def get_users(current_user: FirebaseClaims = Depends(get_current_user)):
-    try:
-        users_ref = db.collection("users").stream()
-        users = []
-        async for user in users_ref:
-            user_data = user.to_dict()
-            user_data["uid"] = user.id
-            users.append(user_data)
-        if len(users) == 0:
-            raise HTTPException(status_code=404, detail="Users not found")
-        return JSONResponse(content={"users": users}, status_code=200)
-    except:
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
 # Endpoint untuk mendapatkan profil user berdasarkan id
 @app.get(
-    "/usersbyid",
+    "/users",
     tags=["Users"],
     summary="Menampilkan data users berdasarkan ID",
     description="untuk menampilkan data profil jika user klik profil pengguna lain.",
@@ -265,25 +247,26 @@ async def get_users(current_user: FirebaseClaims = Depends(get_current_user)):
 async def get_user_by_id(
     user_id: str, current_user: FirebaseClaims = Depends(get_current_user)
 ):
-    try:
-        doc_ref = db.collection("users").document(user_id)
-        user_doc = await doc_ref.get()
-        if user_doc.exists:
-            user_data = user_doc.to_dict()
-            allowed_extensions = ["jpg", "png"]
-            photo_url = None
-            for extension in allowed_extensions:
-                temp_url = store.child(f"users/{user_id}.{extension}").get_url(token)
-                if temp_url is not None:
-                    photo_url = temp_url
-                    break
-            if photo_url:
-                user_data["photo_url"] = photo_url
-            return JSONResponse(content={"user": user_data}, status_code=200)
-        else:
-            raise HTTPException(status_code=404, detail="User not found")
-    except:
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+    doc_ref = db.collection("users").document(user_id)
+    user_doc = await doc_ref.get()
+    if not user_doc.exists:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_data = user_doc.to_dict()
+    photo_url = None
+    allowed_extensions = ["jpg"]
+    for extension in allowed_extensions:
+        try:
+            temp_url = store.child(f"users/{user_id}.{extension}").get_url(token)
+            if temp_url is not None:
+                photo_url = temp_url
+                break
+        except:
+            pass
+    if photo_url is not None:
+        user_data["photo_url"] = photo_url
+    else:
+        user_data["photo_url"] = None
+    return JSONResponse(content={"user": user_data}, status_code=200)
 
 
 @app.get(
@@ -293,27 +276,28 @@ async def get_user_by_id(
     description="digunakan untuk melihat data profil user.",
 )
 async def get_profile(current_user: FirebaseClaims = Depends(get_current_user)):
-    # try:
     user_id = current_user.user_id
     doc_ref = db.collection("users").document(user_id)
     user_doc = await doc_ref.get()
     if user_doc.exists:
         user_data = user_doc.to_dict()
-        allowed_extensions = ["jpg", "png"]
         photo_url = None
+        allowed_extensions = ["jpg"]
         for extension in allowed_extensions:
-            temp_url = store.child(f"users/{user_id}.{extension}").get_url(token)
-            if temp_url is not None:
-                photo_url = temp_url
-                break
-        if photo_url:
+            try:
+                temp_url = store.child(f"users/{user_id}.{extension}").get_url(token)
+                if temp_url is not None:
+                    photo_url = temp_url
+                    break
+            except:
+                pass
+        if photo_url is not None:
             user_data["photo_url"] = photo_url
+        else:
+            user_data["photo_url"] = None
         return JSONResponse(content={"user": user_data}, status_code=200)
     else:
         raise HTTPException(status_code=404, detail="User not found")
-    # except:
-    #     raise HTTPException(status_code=500, detail="Internal Server Error")
-
 
 
 # Endpoint untuk mengubah profil user berdasarkan id
@@ -341,25 +325,39 @@ async def update_profile(
     except:
         raise HTTPException(status_code=400, detail="Failed to Update Profile")
 
-@app.put("/foto-profil", tags=["Profile"], summary="Upload Foto Profil Pengguna", description="endpoint untuk mengunggah foto profil users")
+
+@app.put(
+    "/foto-profil",
+    tags=["Profile"],
+    summary="Upload Foto Profil Pengguna",
+    description="endpoint untuk mengunggah foto profil users",
+)
 async def upload_profile_photo(
     profile_photo: UploadFile = File(...),
-    current_user: FirebaseClaims = Depends(get_current_user)
+    current_user: FirebaseClaims = Depends(get_current_user),
 ):
     user_id = current_user.user_id
     if not user_id:
         raise HTTPException(status_code=403, detail="Forbidden.")
     try:
-        allowed_extensions = ["jpg","png"]
-        file_extension = profile_photo.filename.split(".")[-1]
-        if file_extension not in allowed_extensions:
-            raise HTTPException(status_code=400, detail="Invalid file extension. Only JPG and PNG files are allowed.")
-        filename = f"{user_id}.{file_extension}"
-        store.child(f"users/{filename}").put(profile_photo.file, token) 
+        if profile_photo.content_type != "image/jpeg":
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid content-type. Only JPEG and PNG files are allowed.",
+            )
+        filename = f"{user_id}.jpg"
+        store.child(f"users/{filename}").put(profile_photo.file, token)
         photo_url = store.child(f"users/{filename}").get_url(token)
-        return JSONResponse(content={"message": "Foto profil berhasil diunggah", "photo_url": photo_url}, status_code=200)
+        return JSONResponse(
+            content={
+                "message": "Foto profil berhasil diunggah",
+                "photo_url": photo_url,
+            },
+            status_code=200,
+        )
     except:
         raise HTTPException(status_code=400, detail="Gagal mengunggah foto profil")
+
 
 # Endpoint untuk membuat proyek baru
 @app.post(
@@ -428,7 +426,7 @@ async def get_projects(current_user: FirebaseClaims = Depends(get_current_user))
                 "desc": project_data.get("desc"),
                 "createdByName": user_data.get("name"),
                 "username": user_data.get("username"),
-                "createdById": project_data.get("createdById")
+                "createdById": project_data.get("createdById"),
             }
             projects.append(project_info)
     if len(projects) == 0:
@@ -535,12 +533,16 @@ async def join_project(
     project = await project_ref.get()
     if project.exists:
         join_requests_ref = db.collection("join_requests")
-        join_request_query = join_requests_ref.where(filter=FieldFilter("project_id", "==", project_id)).where(filter=FieldFilter("user_id", "==", user_id))
+        join_request_query = join_requests_ref.where(
+            filter=FieldFilter("project_id", "==", project_id)
+        ).where(filter=FieldFilter("user_id", "==", user_id))
         existing_requests = []
         async for request_doc in join_request_query.stream():
             existing_requests.append(request_doc)
         if existing_requests:
-            raise HTTPException(status_code=400, detail="User has already sent a join request.")
+            raise HTTPException(
+                status_code=400, detail="User has already sent a join request."
+            )
         project_data = project.to_dict()
         created_by = project_data.get("createdById")
         if created_by == user_id:
@@ -769,51 +771,3 @@ async def delete_project_member(
             raise HTTPException(status_code=404, detail="Project not found")
     except:
         raise HTTPException(status_code=500, detail=("Internal Server Error"))
-
-
-# @app.get("/recommendations", tags=["Rekomendasi"])
-# async def get_recommendations(current_user: FirebaseClaims = Depends(get_current_user)):
-#     user_id = current_user.user_id
-#     interactions_ref = db.collection("interactions")
-#     interactions_query = interactions_ref.where(
-#         filter=FieldFilter("id_user", "==", user_id)
-#     )
-#     interactions_docs = await interactions_query.get()
-#     interacted_projects = [doc.get("id_proyek") for doc in interactions_docs]
-#     all_projects = await db.collection("projects").get()
-#     all_project_ids = [doc.id for doc in all_projects]
-#     hits = []
-#     recommendations = {}
-#     for project_id in all_project_ids:
-#         if project_id not in interacted_projects:
-#             test_items = interacted_projects.copy() + [project_id]
-#             u_tensor = tf.convert_to_tensor([user_id] * len(test_items), dtype=tf.int32)
-#             test_items_tensor = tf.convert_to_tensor(test_items, dtype=tf.int32)
-#             predicted_label = model([u_tensor, test_items_tensor])
-#             predicted_labels = tf.squeeze(predicted_label).numpy()
-#             top10_items = [
-#                 test_items[i] for i in np.argsort(predicted_labels)[::-1][:10]
-#             ]
-#             recommendations[project_id] = top10_items
-#     hit_ratio = 0.0
-#     if interacted_projects:
-#         hits = [
-#             1 if rec_item in interacted_projects else 0
-#             for rec_item in recommendations[user_id]
-#         ]
-#         hit_ratio = sum(hits) / len(hits)
-#     # Menghasilkan rekomendasi berdasarkan user_id
-#     if user_id in recommendations:
-#         recommended_items = recommendations[user_id]
-#         return {
-#             "user_id": user_id,
-#             "recommendations": recommended_items,
-#             "hit_ratio": hit_ratio,
-#         }
-#     else:
-#         return {
-#             "user_id": user_id,
-#             "recommendations": [],
-#             "hit_ratio": hit_ratio,
-#             "message": "Belum ada interaksi dengan proyek manapun",
-#         }
