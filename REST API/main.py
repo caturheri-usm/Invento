@@ -1,11 +1,10 @@
 import pyrebase, re, json
 from firebase_admin import auth, credentials, firestore_async, initialize_app, firestore
 from fastapi.responses import JSONResponse
-from fastapi import FastAPI, HTTPException, Depends, File, UploadFile
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Form
 from fastapi_cloudauth.firebase import FirebaseCurrentUser, FirebaseClaims
 from google.cloud.firestore_v1.base_query import FieldFilter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 
 # Inisialisasi aplikasi Firebase
@@ -28,63 +27,15 @@ py = pyrebase.initialize_app(json.load(open("firebase_config.json")))
 pb = py.auth()
 store = py.storage()
 
-# Model data register request
-class RegisterRequest(BaseModel):
-    username: str
-    email: str
-    password: str
-
-
-class FormRegister(BaseModel):
-    name: str
-    tag: list[str]
-    desc: str
-
-
-# Model data loginrequest
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
-class ResetPassword(BaseModel):
-    email: str
-
-
-class UserUpdate(BaseModel):
-    name: str
-    tag: list[str]
-    desc: str
-
-
-class CreateProject(BaseModel):
-    name: str
-    tag: list[str]
-    desc: str
-
-
-class ProjectUpdate(BaseModel):
-    name: str
-    tag: list[str]
-    desc: str
-
-
-class UserInfo(BaseModel):
-    status: bool
-    msg: str
-
 
 # Endpoint untuk registrasi pengguna baru
 @app.post(
     "/register",
     summary="User melakukan registrasi.",
     description="isi request body seperti dibawah ini lalu akan menghasilkan user_id dan token. **setelah register, tampilkan halaman untuk melakukan verifikasi email user**",
-    tags=["Auth"]
+    tags=["Auth"],
 )
-async def register(register: RegisterRequest):
-    username = register.username
-    email = register.email
-    password = register.password
+async def register(username: str = Form(), email: str = Form(), password: str = Form()):
     if not username:
         raise HTTPException(status_code=400, detail="Username is required.")
     if not email or not password:
@@ -136,50 +87,6 @@ async def register(register: RegisterRequest):
             )
 
 
-# endpoint form user register
-@app.post(
-    "/form-register",
-    tags=["Users"],
-    summary="User melakukan pengisian data",
-    description="setelah register dan verifikasi email, user diarahkan untuk melakukan pengisian data seperti **name**, **tags**, **desc**",
-)
-async def formRegister(
-    form: FormRegister, current_user: FirebaseClaims = Depends(get_current_user)
-):
-    name = form.name
-    tag = form.tag
-    desc = form.desc
-    email = current_user.email
-    if not name or not tag:
-        raise HTTPException(status_code=400, detail="Please fill out the field.")
-    elif len(tag) != len(set(tag)):
-        raise HTTPException(status_code=400, detail="Nilai dalam array tag harus unik")
-    try:
-        uid = current_user.user_id
-        users_collection = db.collection("users")
-        user_doc = await users_collection.document(uid).get()
-        if user_doc.exists:
-            username = user_doc.get("username")
-        else:
-            username = ""
-        user_data = {
-            "username": username,
-            "email": email,
-            "name": name,
-            "tag": tag,
-            "desc": desc,
-        }
-        await users_collection.document(uid).set(user_data)
-        return JSONResponse(
-            content={"message": "Data user berhasil disimpan.", "user": user_data},
-            status_code=200,
-        )
-    except:
-        raise HTTPException(
-            status_code=400, detail={"message": "Gagal menyimpan data user."}
-        )
-
-
 # Endpoint login
 @app.post(
     "/login",
@@ -187,9 +94,7 @@ async def formRegister(
     description="isi request body seperti dibawah ini lalu akan menghasilkan user_id dan token.",
     tags=["Auth"],
 )
-async def login(login: LoginRequest):
-    email = login.email
-    password = login.password
+async def login(email: str = Form(), password: str = Form()):
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password are required.")
     try:
@@ -213,8 +118,8 @@ async def login(login: LoginRequest):
     description="User akan menerima email untuk melakukan pembaruan kata sandi",
     tags=["Auth"],
 )
-async def resetPassword(request: ResetPassword):
-    email = request.email
+async def resetPassword(email: str = Form()):
+    # email = request.email
     if not email:
         raise HTTPException(status_code=400, detail="Email cannot be empty")
     try:
@@ -235,6 +140,50 @@ async def current(current_user: FirebaseClaims = Depends(get_current_user)):
         content={"uid": uid, "email": email},
         status_code=200,
     )
+
+
+# endpoint form user register
+@app.post(
+    "/form-register",
+    tags=["Users"],
+    summary="User melakukan pengisian data",
+    description="setelah register dan verifikasi email, user diarahkan untuk melakukan pengisian data seperti **name**, **tags**, **desc**",
+)
+async def formRegister(
+    name: str = Form(),
+    tag: list[str] = Form(),
+    desc: str = Form(),
+    current_user: FirebaseClaims = Depends(get_current_user),
+):
+    email = current_user.email
+    if not name or not tag:
+        raise HTTPException(status_code=400, detail="Please fill out the field.")
+    elif len(tag) != len(set(tag)):
+        raise HTTPException(status_code=400, detail="Nilai dalam array tag harus unik")
+    try:
+        uid = current_user.user_id
+        users_collection = db.collection("users")
+        user_doc = await users_collection.document(uid).get()
+        if user_doc.exists:
+            username = user_doc.get("username")
+        else:
+            username = ""
+        user_data = {
+            "username": username,
+            "email": email,
+            "name": name,
+            "tag": tag,
+            "desc": desc,
+        }
+        await users_collection.document(uid).set(user_data)
+        return JSONResponse(
+            content={"message": "Data user berhasil disimpan."},
+            status_code=200,
+        )
+    except:
+        raise HTTPException(
+            status_code=400, detail={"message": "Gagal menyimpan data user."}
+        )
 
 
 # Endpoint untuk mendapatkan profil user berdasarkan id
@@ -308,17 +257,24 @@ async def get_profile(current_user: FirebaseClaims = Depends(get_current_user)):
     description="Dapat melakukan perubahan data profile user jika ingin mengubahnya.",
 )
 async def update_profile(
-    update_user: UserUpdate,
+    name: str = Form(),
+    tag: list[str] = Form(),
+    desc: str = Form(),
     current_user: FirebaseClaims = Depends(get_current_user),
 ):
-    if len(update_user.tag) != len(set(update_user.tag)):
+    if len(tag) != len(set(tag)):
         raise HTTPException(status_code=400, detail="Nilai dalam array tag harus unik")
     uid = current_user.user_id
     if not uid:
         raise HTTPException(status_code=403, detail="Forbidden")
     try:
         doc_ref = db.collection("users").document(uid)
-        await doc_ref.update(update_user.dict(exclude_unset=True))
+        update_data = {
+            "name": name,
+            "tag": tag,
+            "desc": desc,
+        }
+        await doc_ref.update(update_data)
         return JSONResponse(
             content={"message": "Profil pengguna berhasil diperbarui"}, status_code=200
         )
@@ -343,7 +299,7 @@ async def upload_profile_photo(
         if profile_photo.content_type != "image/jpeg":
             raise HTTPException(
                 status_code=400,
-                detail="Invalid content-type. Only JPEG and PNG files are allowed.",
+                detail="Invalid content-type. Only JPEG or JPG files are allowed.",
             )
         filename = f"{user_id}.jpg"
         store.child(f"users/{filename}").put(profile_photo.file, token)
@@ -367,12 +323,19 @@ async def upload_profile_photo(
     description="Data yang disi berupa nama proyek, tags menggunakan array, dan description project",
 )
 async def create_project(
-    project: CreateProject, current_user: FirebaseClaims = Depends(get_current_user)
+    name: str = Form(...),
+    tag: list[str] = Form(...),
+    desc: str = Form(...),
+    current_user: FirebaseClaims = Depends(get_current_user),
 ):
-    if len(project.tag) != len(set(project.tag)):
+    if len(tag) != len(set(tag)):
         raise HTTPException(status_code=400, detail="Nilai dalam array tag harus unik")
     uid = current_user.user_id
-    project_data = project.dict()
+    project_data = {
+        "name": name,
+        "tag": tag,
+        "desc": desc,
+    }
     if not project_data.get("name"):
         raise HTTPException(status_code=400, detail="Name are required.")
     elif not project_data.get("tag"):
@@ -448,14 +411,13 @@ async def get_project_by_id(
         project_doc = await db.collection("projects").document(project_id).get()
         if project_doc.exists:
             project_data = project_doc.to_dict()
-            user_id = current_user.user_id
-            interaction_data = {"id_user": user_id, "id_proyek": project_id}
-            await db.collection("interactions").add(interaction_data)
+            members_count = len(project_data.get("members", []))
+            project_data["members"] = members_count
             return JSONResponse(content=project_data, status_code=200)
         else:
             raise HTTPException(status_code=404, detail="Project not found")
     except:
-        raise HTTPException(status_code=500, detail=("Internal Message Error"))
+        raise HTTPException(status_code=500, detail=("Internal Server Error"))
 
 
 @app.put(
@@ -466,7 +428,9 @@ async def get_project_by_id(
 )
 async def update_project(
     project_id: str,
-    update_project: ProjectUpdate,
+    name: str = Form(),
+    tag: list[str] = Form(),
+    desc: str = Form(),
     current_user: FirebaseClaims = Depends(get_current_user),
 ):
     try:
@@ -475,10 +439,14 @@ async def update_project(
         project_doc = await doc_ref.get()
         if not project_doc.exists:
             raise HTTPException(status_code=404, detail="Project not found")
-        project_data = project_doc.to_dict()
-        if project_data.get("createdById") != uid:
+        project_updated = {
+            "name": name,
+            "tag": tag,
+            "desc": desc,
+        }
+        if project_updated.get("createdById") != uid:
             raise HTTPException(status_code=403, detail="Access denied")
-        await doc_ref.update(update_project.dict())
+        await doc_ref.update(project_updated)
         updated_project_doc = await doc_ref.get()
         updated_project_data = updated_project_doc.to_dict()
         return JSONResponse(
@@ -489,7 +457,7 @@ async def update_project(
             status_code=200,
         )
     except:
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=400, detail="Project Failed to update")
 
 
 @app.delete(
@@ -616,12 +584,11 @@ async def get_join_requests(
 async def process_join_request(
     project_id: str,
     request_id: str,
-    confirm: UserInfo,
+    status: bool = Form(),
+    msg: str = Form(),
     current_user: FirebaseClaims = Depends(get_current_user),
 ):
     admin_id = current_user.user_id
-    status = confirm.status
-    msg = confirm.msg
     project_ref = db.collection("projects").document(project_id)
     join_request_ref = db.collection("join_requests").document(request_id)
     project = await project_ref.get()
@@ -630,52 +597,59 @@ async def process_join_request(
     join_request = await join_request_ref.get()
     if not join_request.exists:
         raise HTTPException(status_code=404, detail="Join request not found")
+    join_request_data = join_request.to_dict()
+    user_id = join_request_data.get("user_id")
+    user_ref = db.collection("users").document(user_id)
+    user = await user_ref.get()
+    if not user.exists:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan")
+    user_data = user.to_dict()
+    username = user_data.get("username")
+    member_data = {"user_id": user_id, "username": username}
+    await project_ref.update({"members": firestore.ArrayUnion([member_data])})
     await join_request_ref.update({"status": status, "message": msg})
     if status:
-        join_request_data = join_request.to_dict()
-        user_id = join_request_data["user_id"]
-        await project_ref.update({"members": firestore.ArrayUnion([user_id])})
         return JSONResponse(
-            content={"message": "Join request accepted"}, status_code=200
+            content={"message": "Permintaan bergabung diterima"}, status_code=200
         )
     else:
         return JSONResponse(
-            content={"message": "Join request rejected"}, status_code=200
+            content={"message": "Permintaan bergabung ditolak"}, status_code=200
         )
 
 
 @app.get(
     "/projects/{project_id}/members",
-    tags=["Admin-Proyek"],
-    summary="admin proyek bisa melihat daftar user yang telah disetujui untuk bergabung proyek yang dibuat",
-    description="melihat semua daftar users yang telah disetujui bergabung pada admin proyek",
+    tags=["Proyek"],
+    summary="pengguna bisa melihat daftar anggota yang telah bergabung pada suatu proyek",
+    description="melihat semua daftar anggota yang telah bergabung pada suatu proyek",
 )
 async def get_project_members(
     project_id: str,
     current_user: FirebaseClaims = Depends(get_current_user),
 ):
-    try:
-        project_ref = db.collection("projects").document(project_id)
-        project_snapshot = await project_ref.get()
-        if project_snapshot.exists:
-            project_data = project_snapshot.to_dict()
-            if current_user.user_id == project_data.get("createdById"):
-                members = project_data.get("members", [])
-                members_data = []
-                for member_id in members:
-                    user_ref = db.collection("users").document(member_id)
-                    user_snapshot = await user_ref.get()
-                    if user_snapshot.exists:
-                        user_data = user_snapshot.to_dict()
-                        member = {"id": member_id, "name": user_data.get("name")}
-                        members_data.append(member)
-                return {"members": members_data}
-            else:
-                raise HTTPException(status_code=403, detail="Access denied")
-        else:
-            raise HTTPException(status_code=404, detail="Project not found")
-    except:
-        raise HTTPException(status_code=500, detail=("Internal Server Error"))
+    project_ref = db.collection("projects").document(project_id)
+    project_snapshot = await project_ref.get()
+    if project_snapshot.exists:
+        project_data = project_snapshot.to_dict()
+        members = project_data.get("members", [])
+        members_data = []
+        for member_data in members:
+            user_id = member_data.get("user_id")
+            username = member_data.get("username")
+            user_ref = db.collection("users").document(user_id)
+            user_snapshot = await user_ref.get()
+            if user_snapshot.exists:
+                user_data = user_snapshot.to_dict()
+                member = {
+                    "user_id": user_id,
+                    "username": username,
+                    "name": user_data.get("name"),
+                }
+                members_data.append(member)
+        return {"members": members_data}
+    else:
+        raise HTTPException(status_code=404, detail="Members not found")
 
 
 @app.get(
@@ -694,6 +668,8 @@ async def get_my_projects(current_user: FirebaseClaims = Depends(get_current_use
     projects = []
     async for project in projects_ref:
         project_data = project.to_dict()
+        members_count = len(project_data.get("members", []))
+        project_data["members"] = members_count
         project_data["project_id"] = project.id
         projects.append(project_data)
     if len(projects) == 0:
