@@ -15,7 +15,7 @@ db = firestore_async.client()
 app = FastAPI(
     title="Invento App API",
     description="API ini dibangun menggunakan FastAPI dan digunakan untuk menciptakan alur app invento ke mobile client.",
-    version="1.0.0",
+    version="Production",
 )
 
 with open("firebase_config.json") as f:
@@ -526,8 +526,8 @@ async def join_project(
         join_request_data = {
             "project_id": project_id,
             "user_id": user_id,
-            "status": False,
-            "message": f"{user_name} requests to join your {project_name} project.",
+            "status": None,
+            "message": f"{user_name} requests to join {project_name} project.",
         }
         await join_request_doc.set(join_request_data)
         return JSONResponse(
@@ -557,7 +557,7 @@ async def get_join_requests(
         join_requests_ref = db.collection("join_requests")
         join_requests_query = join_requests_ref.where(
             filter=FieldFilter("project_id", "==", project_id)
-        ).where(filter=FieldFilter("status", "==", False))
+        ).where(filter=FieldFilter("status", "==", None))
         join_requests = []
         async for request_doc in join_requests_query.stream():
             request_data = request_doc.to_dict()
@@ -585,7 +585,6 @@ async def process_join_request(
     project_id: str,
     request_id: str,
     status: bool = Form(),
-    msg: str = Form(),
     current_user: FirebaseClaims = Depends(get_current_user),
 ):
     admin_id = current_user.user_id
@@ -605,16 +604,21 @@ async def process_join_request(
         raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan")
     user_data = user.to_dict()
     username = user_data.get("username")
-    member_data = {"user_id": user_id, "username": username}
-    await project_ref.update({"members": firestore.ArrayUnion([member_data])})
-    await join_request_ref.update({"status": status, "message": msg})
     if status:
+        member_data = {"user_id": user_id, "username": username}
+        await project_ref.update({"members": firestore.ArrayUnion([member_data])})
+        await join_request_ref.update(
+            {"status": status, "message": "Selamat! Permintaan bergabung diterima."}
+        )
         return JSONResponse(
-            content={"message": "Permintaan bergabung diterima"}, status_code=200
+            content={"message": "Permintaan bergabung diterima."}, status_code=200
         )
     else:
+        await join_request_ref.update(
+            {"status": status, "message": "Maaf, Permintaan bergabung ditolak."}
+        )
         return JSONResponse(
-            content={"message": "Permintaan bergabung ditolak"}, status_code=200
+            content={"message": "Permintaan bergabung ditolak."}, status_code=200
         )
 
 
@@ -700,12 +704,21 @@ async def my_join_requests(current_user: FirebaseClaims = Depends(get_current_us
         project_snapshot = await project_ref.get()
         if project_snapshot.exists:
             project_data = project_snapshot.to_dict()
+            status = join_request_data.get("status")
+            message = join_request_data.get("message")
+            if status is None:
+                status = "Diproses."
+                message = "Permintaan bergabung sedang diproses."
+            elif status is True:
+                status = "Diterima."
+            else:
+                status = "Ditolak."
             join_request_info = {
                 "join_request_id": join_request.id,
                 "project_id": project_id,
                 "project_name": project_data.get("name"),
-                "message": join_request_data.get("message"),
-                "status": join_request_data.get("status"),
+                "message": message,
+                "status": status,
             }
             join_requests.append(join_request_info)
     if not join_requests:
@@ -731,16 +744,16 @@ async def delete_project_member(
             project_data = project_snapshot.to_dict()
             if current_user.user_id == project_data.get("createdById"):
                 members = project_data.get("members", [])
-                if user_id in members:
-                    members.remove(user_id)
-                    await project_ref.update({"members": members})
-                    return {
-                        "message": "Member has been successfully removed from the project"
-                    }
-                else:
+                updated_members = [member for member in members if member.get("user_id") != user_id]
+                if members == updated_members:
                     raise HTTPException(
                         status_code=404, detail="Member not found in project"
                     )
+                else:
+                    await project_ref.update({"members": updated_members})
+                    return {
+                        "message": "Member has been successfully removed from the project."
+                    }
             else:
                 raise HTTPException(status_code=403, detail="Access denied")
         else:
